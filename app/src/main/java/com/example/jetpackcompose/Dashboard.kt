@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.TransformableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,6 +29,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -51,6 +53,36 @@ class Dashboard : ComponentActivity() {
 }
 
 @Composable
+fun CustomStyledButton(
+    text: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5)),
+        shape = RoundedCornerShape(8.dp),
+        modifier = modifier.padding(horizontal = 2.dp) // Reduced padding
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = text,
+            tint = Color.White,
+            modifier = Modifier.size(10.dp)
+        )
+        Spacer(modifier = Modifier.width(4.dp)) // Adjust space between icon and text if needed
+        Text(
+            text = text,
+            color = Color.White,
+            maxLines = 1,
+            modifier = Modifier.padding(0.dp),
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
 fun UserDashboard(username: String, initialTransactions: List<Transaction>) {
     val context = LocalContext.current
     var searchText by remember { mutableStateOf("") }
@@ -58,6 +90,8 @@ fun UserDashboard(username: String, initialTransactions: List<Transaction>) {
 
     // Convert the provided list to a mutable state list for instant UI updates
     val transactions = remember { mutableStateListOf<Transaction>().apply { addAll(initialTransactions) } }
+    // Mutable state for total tokens (starting value: 1000, adjust as needed)
+    var totalTokens by remember { mutableDoubleStateOf(TransactionHistory.getInstance().tokens) }
 
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         if (result.contents != null) {
@@ -71,13 +105,17 @@ fun UserDashboard(username: String, initialTransactions: List<Transaction>) {
         val ivBytes = Base64.decode(qrData.iv, Base64.DEFAULT)
         val decryptedData = Decryption().decryptAES(qrData.encryptedData, secretKey, ivBytes)
         val decryptedJsonData = Gson().fromJson(decryptedData, QRData::class.java)
-        val id = decryptedJsonData.id;
+        val id = decryptedJsonData.id
+        val amountValue = decryptedJsonData.amount.toIntOrNull() ?: 0
 
         if(TransactionHistory.getInstance().qrID.add(id)) {
             if (decryptedJsonData.paymentType == "Buyer") {
+                totalTokens -= amountValue
+                TransactionHistory.getInstance().tokens = totalTokens
                 context.startActivity(
                     Intent(context, PaymentActivity::class.java).putExtra("data", decryptedData)
                 )
+
             } else if (decryptedJsonData.paymentType == "Seller") {
                 val formattedDate = LocalDate.parse(decryptedJsonData.date, DateTimeFormatter.ISO_LOCAL_DATE)
                     .format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
@@ -92,12 +130,17 @@ fun UserDashboard(username: String, initialTransactions: List<Transaction>) {
 
                 // Add the new transaction only to the mutable state list so the UI refreshes
                 transactions.add(newTransaction)
-                TransactionHistory.getInstance().transactionList.add(newTransaction)            // If global history must also be updated and is separate, do that here.
                 // Otherwise, omit the next line to avoid duplicate additions:
-                // TransactionHistory.getInstance().transactionList.add(newTransaction)
+                TransactionHistory.getInstance().transactionList.add(newTransaction)
+                // Assuming decryptedJsonData.amount is convertible to Int; adjust logic if needed.
+
+                totalTokens += amountValue
+
+
+                TransactionHistory.getInstance().tokens = totalTokens
             }
         } else {
-            Toast.makeText(context, "QR Already scanned", Toast.LENGTH_LONG).show();
+            Toast.makeText(context, "QR Already scanned", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -144,26 +187,33 @@ fun UserDashboard(username: String, initialTransactions: List<Transaction>) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                StyledButton("Filter", Icons.Default.FilterList) {}
-                StyledButton("Generate QR", Icons.Default.QrCodeScanner) {
+                CustomStyledButton("Filter", Icons.Default.FilterList) {}
+                CustomStyledButton("Generate QR", Icons.Default.QrCodeScanner) {
                     val intent = Intent(context, QRGeneration::class.java)
                     intent.putExtra("user", username)
                     context.startActivity(intent)
                 }
-                StyledButton("Sort", Icons.Default.Sort) {}
+                CustomStyledButton("Sort", Icons.Default.Sort) {}
             }
+            Spacer(modifier = Modifier.height(20.dp))
+
+            TotalTokenDisplay(totalTokens = totalTokens)
 
             Spacer(modifier = Modifier.height(20.dp))
 
             // Transactions Section
             Text("Recent Transactions", color = Color.White, fontSize = 20.sp)
+
             Spacer(modifier = Modifier.height(10.dp))
+
             LazyColumn {
                 items(transactions) { transaction ->
                     TransactionItem(transaction)
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
+
+
         }
 
         FloatingActionButton(
@@ -194,19 +244,19 @@ fun UserDashboard(username: String, initialTransactions: List<Transaction>) {
 
 
 
-@Composable
-fun StyledButton(text: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5)),
-        shape = RoundedCornerShape(8.dp),
-        modifier = modifier.padding(horizontal = 4.dp) // Move padding inside
-    ) {
-        Icon(imageVector = icon, contentDescription = text, tint = Color.White, modifier = Modifier.size(10.dp))
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(text, color = Color.White)
-    }
-}
+//@Composable
+//fun StyledButton(text: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
+//    Button(
+//        onClick = onClick,
+//        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5)),
+//        shape = RoundedCornerShape(8.dp),
+//        modifier = modifier.padding(horizontal = 4.dp) // Move padding inside
+//    ) {
+//        Icon(imageVector = icon, contentDescription = text, tint = Color.White, modifier = Modifier.size(10.dp))
+//        Spacer(modifier = Modifier.width(8.dp))
+//        Text(text, color = Color.White)
+//    }
+//}
 
 @Composable
 fun TransactionItem(transaction: Transaction) {
@@ -240,3 +290,37 @@ fun TransactionItem(transaction: Transaction) {
 
 data class Transaction(val date: String, val receiver: String, val amount: String, val icon: Int,val paymentType:String)
 
+@Composable
+fun TotalTokenDisplay(totalTokens: Double) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E88E5))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            Text(
+                text = "Total Tokens",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = totalTokens.toString(),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+    }
+}
+
+@Preview(widthDp = 360)
+@Composable
+fun UserDashboardPreview() {
+    UserDashboard("John Doe", emptyList())
+}
