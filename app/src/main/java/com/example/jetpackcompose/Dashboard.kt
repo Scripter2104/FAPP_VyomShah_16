@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Base64
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -33,6 +34,8 @@ import androidx.compose.ui.unit.sp
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.google.gson.Gson
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import javax.crypto.spec.SecretKeySpec
 
 class Dashboard : ComponentActivity() {
@@ -48,21 +51,54 @@ class Dashboard : ComponentActivity() {
 }
 
 @Composable
-fun UserDashboard(username: String,transactions:List<Transaction>) {
+fun UserDashboard(username: String, initialTransactions: List<Transaction>) {
     val context = LocalContext.current
     var searchText by remember { mutableStateOf("") }
-    var scannedData by remember { mutableStateOf("No QR Sanned yet") }
+    var scannedData by remember { mutableStateOf("No QR Scanned yet") }
+
+    // Convert the provided list to a mutable state list for instant UI updates
+    val transactions = remember { mutableStateListOf<Transaction>().apply { addAll(initialTransactions) } }
 
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         if (result.contents != null) {
             scannedData = result.contents
         }
-        val qrData = Gson().fromJson(scannedData,encryptedData::class.java)
+
+        val qrData = Gson().fromJson(scannedData, encryptedData::class.java)
+
         val secretKeyBytes = Base64.decode(qrData.secretKey, Base64.DEFAULT)
         val secretKey = SecretKeySpec(secretKeyBytes, "AES")
         val ivBytes = Base64.decode(qrData.iv, Base64.DEFAULT)
         val decryptedData = Decryption().decryptAES(qrData.encryptedData, secretKey, ivBytes)
-        context.startActivity(Intent(context,PaymentActivity::class.java).putExtra("data",decryptedData))
+        val decryptedJsonData = Gson().fromJson(decryptedData, QRData::class.java)
+        val id = decryptedJsonData.id;
+
+        if(TransactionHistory.getInstance().qrID.add(id)) {
+            if (decryptedJsonData.paymentType == "Buyer") {
+                context.startActivity(
+                    Intent(context, PaymentActivity::class.java).putExtra("data", decryptedData)
+                )
+            } else if (decryptedJsonData.paymentType == "Seller") {
+                val formattedDate = LocalDate.parse(decryptedJsonData.date, DateTimeFormatter.ISO_LOCAL_DATE)
+                    .format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
+
+                val newTransaction = Transaction(
+                    formattedDate,
+                    decryptedJsonData.user,
+                    "+₹${decryptedJsonData.amount}",
+                    R.drawable.img_2,
+                    "Seller"
+                )
+
+                // Add the new transaction only to the mutable state list so the UI refreshes
+                transactions.add(newTransaction)
+                TransactionHistory.getInstance().transactionList.add(newTransaction)            // If global history must also be updated and is separate, do that here.
+                // Otherwise, omit the next line to avoid duplicate additions:
+                // TransactionHistory.getInstance().transactionList.add(newTransaction)
+            }
+        } else {
+            Toast.makeText(context, "QR Already scanned", Toast.LENGTH_LONG).show();
+        }
     }
 
     Box(
@@ -79,7 +115,12 @@ fun UserDashboard(username: String,transactions:List<Transaction>) {
             modifier = Modifier.fillMaxSize()
         ) {
             // Header
-            Text("QR Wallet", color = Color.White, fontSize = 28.sp, style = MaterialTheme.typography.headlineLarge)
+            Text(
+                "QR Wallet",
+                color = Color.White,
+                fontSize = 28.sp,
+                style = MaterialTheme.typography.headlineLarge
+            )
             Spacer(modifier = Modifier.height(10.dp))
 
             // Search Bar
@@ -118,16 +159,12 @@ fun UserDashboard(username: String,transactions:List<Transaction>) {
             Text("Recent Transactions", color = Color.White, fontSize = 20.sp)
             Spacer(modifier = Modifier.height(10.dp))
             LazyColumn {
-                items(transactions){transaction ->
+                items(transactions) { transaction ->
                     TransactionItem(transaction)
                     Spacer(modifier = Modifier.height(8.dp))
-
                 }
             }
-
-
         }
-
 
         FloatingActionButton(
             onClick = {
@@ -136,6 +173,7 @@ fun UserDashboard(username: String,transactions:List<Transaction>) {
                     setPrompt("Scan a QR Code")
                     setCameraId(0)
                     setBeepEnabled(true)
+                    setOrientationLocked(true)
                     setBarcodeImageEnabled(true)
                 }
                 scanLauncher.launch(options)
@@ -153,6 +191,7 @@ fun UserDashboard(username: String,transactions:List<Transaction>) {
         }
     }
 }
+
 
 
 @Composable
@@ -182,7 +221,11 @@ fun TransactionItem(transaction: Transaction) {
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(transaction.date, color = Color.White.copy(0.8f), fontSize = 14.sp)
-                Text("To: ${transaction.receiver}", color = Color.White, fontSize = 18.sp)
+                Text(
+                    "${if (transaction.paymentType == "Buyer") "To" else "From"}: ${transaction.receiver}",
+                    color = Color.White,
+                    fontSize = 18.sp
+                )
                 Text(transaction.amount, color = Color.White.copy(0.8f), fontSize = 14.sp)
             }
             Icon(
@@ -195,5 +238,5 @@ fun TransactionItem(transaction: Transaction) {
     }
 }
 
-data class Transaction(val date: String, val receiver: String, val amount: String, val icon: Int)
+data class Transaction(val date: String, val receiver: String, val amount: String, val icon: Int,val paymentType:String)
 

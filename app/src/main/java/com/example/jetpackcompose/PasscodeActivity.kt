@@ -97,10 +97,11 @@ fun PasscodeScreen(data:String){
 
         Button(
             onClick = { if(passcode.equals("1234")){
-                val intent = Intent(context,Dashboard::class.java)
+                val intent = Intent(context,AcknowledgementActivity::class.java)
                 intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                val newTransaction = Transaction(LocalDate.now().format(DateTimeFormatter.ofPattern("MMM d, yyyy")).toString(),qrData.user,"₹"+qrData.amount+".00",R.drawable.img_2)
+                val newTransaction = Transaction(LocalDate.now().format(DateTimeFormatter.ofPattern("MMM d, yyyy")).toString(),qrData.user,"-₹"+qrData.amount+".00",R.drawable.img_2,"Buyer")
                 TransactionHistory.getInstance().transactionList.add(newTransaction)
+                intent.putExtra("data",data)
                 context.startActivity(intent)
             } },
             enabled = passcode.length == maxPasscodeLength,
